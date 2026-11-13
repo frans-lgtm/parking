@@ -1,0 +1,361 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#101827">
+  <meta name="description" content="Find nearby parking with PARKING.">
+  <title>PARKING - Find Your Spot</title>
+
+  <link rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #101827;
+      color: white;
+    }
+    header {
+      padding: 18px;
+      background: #101827;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .logo {
+      font-size: 25px;
+      font-weight: 900;
+      letter-spacing: 2px;
+    }
+    .logo span { color: #42a5ff; }
+    .subtitle { color: #9caac0; font-size: 12px; margin-top: 5px; }
+    .status {
+      color: #70e5a0;
+      font-size: 11px;
+    }
+    .search-area { padding: 0 16px 14px; }
+    .search-area input {
+      width: 100%;
+      padding: 15px;
+      border: 1px solid #344258;
+      border-radius: 12px;
+      background: #1b293d;
+      color: white;
+      font-size: 15px;
+      outline: none;
+    }
+    .actions {
+      display: flex;
+      gap: 9px;
+      margin-top: 12px;
+    }
+    button {
+      border: 0;
+      padding: 13px;
+      border-radius: 11px;
+      font-weight: bold;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .primary {
+      background: #2585f5;
+      color: white;
+      flex: 1;
+    }
+    .secondary {
+      background: #29384d;
+      color: white;
+      flex: 1;
+    }
+    #map {
+      height: 49vh;
+      min-height: 300px;
+      width: 100%;
+      z-index: 1;
+    }
+    .panel {
+      background: #101827;
+      padding: 17px;
+      border-radius: 20px 20px 0 0;
+      margin-top: -12px;
+      position: relative;
+      z-index: 2;
+    }
+    .panel h3 { margin: 2px 0 5px; }
+    .muted { color: #93a4bb; font-size: 12px; }
+    #results { margin-top: 14px; }
+    .parking-card {
+      background: #1b293d;
+      border: 1px solid #2e4058;
+      padding: 14px;
+      border-radius: 13px;
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .parking-card h4 { margin: 0 0 6px; font-size: 14px; }
+    .parking-card p { margin: 0; color: #9eacc0; font-size: 12px; }
+    .distance { color: #62b2ff; font-weight: bold; font-size: 12px; }
+    .directions {
+      display: inline-block;
+      margin-top: 8px;
+      background: #2585f5;
+      padding: 8px 11px;
+      border-radius: 8px;
+      color: white;
+      text-decoration: none;
+      font-size: 11px;
+    }
+    #message {
+      color: #a9bad0;
+      font-size: 13px;
+      line-height: 1.6;
+      margin: 12px 0;
+    }
+    footer {
+      text-align: center;
+      color: #71829a;
+      padding: 18px;
+      font-size: 11px;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div>
+      <div class="logo">PARK<span>ING</span></div>
+      <div class="subtitle">Find your perfect parking spot</div>
+    </div>
+    <div class="status">● LIVE MAP</div>
+  </header>
+
+  <div class="search-area">
+    <input id="search" placeholder="Search city or location...">
+    <div class="actions">
+      <button class="primary" onclick="locateMe()">
+        📍 My Location
+      </button>
+      <button class="secondary" onclick="findParking()">
+        🔎 Find Parking
+      </button>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <section class="panel">
+    <h3>Nearby Parking</h3>
+    <div class="muted" id="count">Waiting for your location...</div>
+    <div id="message">
+      Allow location access to discover parking spots around you.
+    </div>
+    <div id="results"></div>
+  </section>
+
+  <footer>
+    PARKING © 2026 · Map data © OpenStreetMap contributors
+  </footer>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    const map = L.map('map').setView([31.6295, -7.9811], 13);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+
+    let userPosition = null;
+    let userMarker = null;
+    let parkingMarkers = [];
+
+    function showMessage(text) {
+      document.getElementById('message').textContent = text;
+    }
+
+    function distance(lat1, lon1, lat2, lon2) {
+      const R = 6371;
+      const dLat = (lat2-lat1) * Math.PI/180;
+      const dLon = (lon2-lon1) * Math.PI/180;
+      const a =
+        Math.sin(dLat/2)**2 +
+        Math.cos(lat1*Math.PI/180) *
+        Math.cos(lat2*Math.PI/180) *
+        Math.sin(dLon/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    function locateMe() {
+      if (!navigator.geolocation) {
+        showMessage('Your browser does not support GPS.');
+        return;
+      }
+
+      showMessage('Getting your location...');
+
+      navigator.geolocation.getCurrentPosition(
+        position => {
+          userPosition = {
+            lat: position.coords.latitude,
+            lon: position.coords.longitude
+          };
+
+          map.setView([userPosition.lat, userPosition.lon], 15);
+
+          if (userMarker) map.removeLayer(userMarker);
+
+          userMarker = L.marker([
+            userPosition.lat, userPosition.lon
+          ]).addTo(map).bindPopup('You are here').openPopup();
+
+          showMessage('Location found! Now search nearby parking.');
+          findParking();
+        },
+        error => {
+          showMessage('Location unavailable. Please allow GPS permission and try again.');
+        },
+        { enableHighAccuracy: true, timeout: 15000 }
+      );
+    }
+
+    async function findParking() {
+      if (!userPosition) {
+        showMessage('Please press My Location first.');
+        return;
+      }
+
+      showMessage('Searching for nearby parking...');
+      document.getElementById('results').innerHTML = '';
+
+      const query = `
+        [out:json][timeout:25];
+        (
+          node["amenity"="parking"](around:3000,${userPosition.lat},${userPosition.lon});
+          way["amenity"="parking"](around:3000,${userPosition.lat},${userPosition.lon});
+          relation["amenity"="parking"](around:3000,${userPosition.lat},${userPosition.lon});
+        );
+        out center tags;
+      `;
+
+      try {
+        const response = await fetch(
+          'https://overpass-api.de/api/interpreter',
+          {
+            method: 'POST',
+            body: 'data=' + encodeURIComponent(query)
+          }
+        );
+
+        if (!response.ok) throw new Error('Search failed');
+
+        const data = await response.json();
+
+        parkingMarkers.forEach(marker => map.removeLayer(marker));
+        parkingMarkers = [];
+
+        const places = data.elements.map(place => {
+          const lat = place.lat ?? place.center?.lat;
+          const lon = place.lon ?? place.center?.lon;
+          if (lat == null || lon == null) return null;
+
+          return {
+            lat,
+            lon,
+            name: place.tags?.name || 'Parking',
+            distance: distance(
+              userPosition.lat, userPosition.lon, lat, lon
+            )
+          };
+        }).filter(Boolean).sort((a,b) => a.distance - b.distance);
+
+        const results = document.getElementById('results');
+        const count = document.getElementById('count');
+
+        count.textContent = places.length + ' parking spots found';
+
+        if (!places.length) {
+          showMessage('No mapped parking found nearby. Try another area.');
+          return;
+        }
+
+        showMessage('Here are parking places mapped near you.');
+
+        places.forEach((place, index) => {
+          const marker = L.marker([place.lat, place.lon])
+            .addTo(map)
+            .bindPopup(
+              '<b>' + escapeHTML(place.name) + '</b><br>' +
+              place.distance.toFixed(2) + ' km away'
+            );
+
+          parkingMarkers.push(marker);
+
+          const card = document.createElement('div');
+          card.className = 'parking-card';
+
+          const info = document.createElement('div');
+          const title = document.createElement('h4');
+          title.textContent = '🅿️ ' + place.name;
+
+          const detail = document.createElement('p');
+          detail.textContent = 'Parking location';
+
+          const link = document.createElement('a');
+          link.className = 'directions';
+          link.textContent = 'Get directions';
+          link.href =
+            'https://www.google.com/maps/dir/?api=1&destination=' +
+            place.lat + ',' + place.lon;
+          link.target = '_blank';
+          link.rel = 'noopener';
+
+          info.append(title, detail, link);
+
+          const dist = document.createElement('span');
+          dist.className = 'distance';
+          dist.textContent = place.distance < 1
+            ? Math.round(place.distance * 1000) + ' m'
+            : place.distance.toFixed(1) + ' km';
+
+          card.append(info, dist);
+          results.appendChild(card);
+        });
+      } catch (error) {
+        showMessage('Could not load parking data. Please try again later.');
+      }
+    }
+
+    function escapeHTML(value) {
+      return String(value).replace(/[&<>"']/g, char => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      })[char]);
+    }
+
+    document.getElementById('search').addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        const city = event.target.value.trim();
+        if (city) {
+          window.open(
+            'https://www.openstreetmap.org/search?query=' +
+            encodeURIComponent(city),
+            '_blank'
+          );
+        }
+      }
+    });
+  </script>
+</body>
+  </html>
+  
